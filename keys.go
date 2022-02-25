@@ -104,7 +104,7 @@ type KeyVersion struct {
 	CreationDate *time.Time `json:"creationDate,omitempty"`
 }
 
-// NonDeletedKeyVersionsSum Experimental. Might change or be deleted in the future. Use at your own risk.
+// NonDeletedKeyVersionsSum Experimental. It might change or be deleted in the future without warning. Use it at your own risk.
 func (c *Client) NonDeletedKeyVersionsSum(ctx context.Context) (int, error) {
 	keyIds, err := c.uniqueNonDeletedKeyIds(ctx)
 	if err != nil {
@@ -127,8 +127,7 @@ func (c *Client) uniqueNonDeletedKeyIds(ctx context.Context) ([]string, error) {
 	offset := 0
 	const limit = 5000 // max allowed by the REST API
 	for {
-		// c.GetKeys does not support state filtering yet.
-		// Extending it would not be a big deal but we might want do at one shot adding key search capabilities as well.
+		// c.GetKeys by default excludes deleted keys (status == 5)
 		keys, err := c.GetKeys(ctx, limit, offset)
 		if err != nil {
 			return nil, err
@@ -137,11 +136,9 @@ func (c *Client) uniqueNonDeletedKeyIds(ctx context.Context) ([]string, error) {
 			break
 		}
 		for _, key := range keys.Keys {
-			if key.State != 5 {
-				// using a map so we are sure there is no repeting keys, which is possible during pagination, in
-				// case keys are deleted at the same time of pagination.
-				keyMap[key.ID] = true
-			}
+			// using a map so we are sure there is no repeating keys, which is possible during pagination, in
+			// case keys are deleted at the same time of pagination.
+			keyMap[key.ID] = true
 		}
 		if keys.Metadata.NumberOfKeys < limit {
 			break
@@ -155,7 +152,6 @@ func (c *Client) uniqueNonDeletedKeyIds(ctx context.Context) ([]string, error) {
 		i++
 	}
 	return keyIdArray, nil
-
 }
 
 func (c *Client) keyVersionsCount(ctx context.Context, keyId string) (int, error) {
@@ -175,7 +171,6 @@ func (c *Client) keyVersionsCount(ctx context.Context, keyId string) (int, error
 		offset = offset + limit
 	}
 	return keyVersionscount, nil
-
 }
 
 // CreateKey creates a new KP key.
@@ -313,6 +308,7 @@ func (c *Client) GetKeys(ctx context.Context, limit int, offset int) (*Keys, err
 }
 
 // GetKeyVersions Experimental. Might change or be deleted in the future. Use at your own risk.
+// Waiting for KP v2.96 to add totalCount support
 func (c *Client) GetKeyVersions(ctx context.Context, id string, limit int, offset int) (*KeyVersions, error) {
 	if limit == 0 {
 		limit = 5000
@@ -331,7 +327,6 @@ func (c *Client) GetKeyVersions(ctx context.Context, id string, limit int, offse
 	if err != nil {
 		return nil, err
 	}
-
 	return &keyVersions, nil
 }
 
