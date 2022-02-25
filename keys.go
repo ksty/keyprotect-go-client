@@ -74,10 +74,20 @@ type KeysMetadata struct {
 	NumberOfKeys   int    `json:"collectionTotal"`
 }
 
+type KeyVersionsMetadata struct {
+	CollectionType  string `json:"collectionType"`
+	CollectionTotal int    `json:"collectionTotal"`
+}
+
 // Keys represents a collection of Keys.
 type Keys struct {
 	Metadata KeysMetadata `json:"metadata"`
 	Keys     []Key        `json:"resources"`
+}
+
+type KeyVersions struct {
+	Metadata KeyVersionsMetadata `json:"metadata"`
+	Keys     []KeyVersion        `json:"resources"`
 }
 
 // KeysActionRequest represents request parameters for a key action
@@ -92,6 +102,80 @@ type KeysActionRequest struct {
 type KeyVersion struct {
 	ID           string     `json:"id,omitempty"`
 	CreationDate *time.Time `json:"creationDate,omitempty"`
+}
+
+// NonDeletedKeyVersionsSum Experimental. Might change or be deleted in the future. Use at your own risk.
+func (c *Client) NonDeletedKeyVersionsSum(ctx context.Context) (int, error) {
+	keyIds, err := c.uniqueNonDeletedKeyIds(ctx)
+	if err != nil {
+		return -1, err
+	}
+	totalKeyVersionsCount := 0
+	for _, keyId := range keyIds {
+		keyVersionCount, err := c.keyVersionsCount(ctx, keyId)
+		if err != nil {
+			return -1, err
+		}
+		totalKeyVersionsCount = totalKeyVersionsCount + keyVersionCount
+	}
+	return totalKeyVersionsCount, nil
+}
+
+// return the keys ids of non deleted keys, without duplicates
+func (c *Client) uniqueNonDeletedKeyIds(ctx context.Context) ([]string, error) {
+	keyMap := map[string]bool{}
+	offset := 0
+	const limit = 5000 // max allowed by the REST API
+	for {
+		// c.GetKeys does not support state filtering yet.
+		// Extending it would not be a big deal but we might want do at one shot adding key search capabilities as well.
+		keys, err := c.GetKeys(ctx, limit, offset)
+		if err != nil {
+			return nil, err
+		}
+		if keys.Metadata.NumberOfKeys == 0 {
+			break
+		}
+		for _, key := range keys.Keys {
+			if key.State != 5 {
+				// using a map so we are sure there is no repeting keys, which is possible during pagination, in
+				// case keys are deleted at the same time of pagination.
+				keyMap[key.ID] = true
+			}
+		}
+		if keys.Metadata.NumberOfKeys < limit {
+			break
+		}
+		offset = offset + limit
+	}
+	keyIdArray := make([]string, len(keyMap))
+	i := 0
+	for keyId := range keyMap {
+		keyIdArray[i] = keyId
+		i++
+	}
+	return keyIdArray, nil
+
+}
+
+func (c *Client) keyVersionsCount(ctx context.Context, keyId string) (int, error) {
+	offset := 0
+	const limit = 5000 // max allowed by the REST API
+	keyVersionscount := 0
+	for {
+		// waiting for KP v2.96 to make use of totalCount boolean query parameter, for now using pagination.
+		keyVersions, err := c.GetKeyVersions(ctx, keyId, limit, offset)
+		if err != nil {
+			return -1, err
+		}
+		keyVersionscount = keyVersionscount + keyVersions.Metadata.CollectionTotal
+		if keyVersions.Metadata.CollectionTotal < limit {
+			break
+		}
+		offset = offset + limit
+	}
+	return keyVersionscount, nil
+
 }
 
 // CreateKey creates a new KP key.
@@ -226,6 +310,29 @@ func (c *Client) GetKeys(ctx context.Context, limit int, offset int) (*Keys, err
 	}
 
 	return &keys, nil
+}
+
+// GetKeyVersions Experimental. Might change or be deleted in the future. Use at your own risk.
+func (c *Client) GetKeyVersions(ctx context.Context, id string, limit int, offset int) (*KeyVersions, error) {
+	if limit == 0 {
+		limit = 5000
+	}
+	req, err := c.newRequest("GET", fmt.Sprintf("keys/%s/versions", id), nil)
+	if err != nil {
+		return nil, err
+	}
+	v := url.Values{}
+	v.Set("limit", strconv.Itoa(limit))
+	v.Set("offset", strconv.Itoa(offset))
+	req.URL.RawQuery = v.Encode()
+
+	keyVersions := KeyVersions{}
+	_, err = c.do(ctx, req, &keyVersions)
+	if err != nil {
+		return nil, err
+	}
+
+	return &keyVersions, nil
 }
 
 // GetKey retrieves a key by ID or alias name.
