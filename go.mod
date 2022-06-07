@@ -1,4 +1,4 @@
-module github.com/IBM/keyprotect-go-client
+module github.com/ksty/keyprotect-go-client
 
 go 1.12
 
